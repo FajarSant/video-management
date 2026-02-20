@@ -145,7 +145,10 @@ export default function CustomerDashboardPage() {
                 </div>
               </CardContent>
               <CardFooter>
-                <Button className="w-full" onClick={() => window.open(access.video.url, '_blank')}>
+                <Button
+                  className="w-full"
+                  onClick={() => router.push(`/customer/watch/${access.video.id}`)}
+                >
                   <Play className="h-4 w-4 mr-2" />
                   Tonton Video
                 </Button>
