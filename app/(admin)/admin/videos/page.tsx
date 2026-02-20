@@ -66,10 +66,9 @@ export default function AdminVideosPage() {
     thumbnailUrl: '',
   })
   const [formErrors, setFormErrors] = useState<Record<string, string>>({})
-  
-  // State untuk menyimpan info file yang diupload
-  const [uploadedVideo, setUploadedVideo] = useState<UploadedFile | null>(null)
-  const [uploadedThumbnail, setUploadedThumbnail] = useState<UploadedFile | null>(null)
+  const [selectedVideoFile, setSelectedVideoFile] = useState<File | null>(null)
+  const [selectedThumbnailFile, setSelectedThumbnailFile] = useState<File | null>(null)
+  const [submitting, setSubmitting] = useState(false)
 
   // Cek autentikasi
   useEffect(() => {
@@ -142,8 +141,12 @@ export default function AdminVideosPage() {
       errors.title = 'Judul wajib diisi'
     }
 
-    if (!formData.url.trim()) {
+    if (uploadMethod === 'link' && !formData.url.trim()) {
       errors.url = 'URL video wajib diisi'
+    }
+
+    if (uploadMethod === 'upload' && !editingVideo && !selectedVideoFile) {
+      errors.url = 'File video wajib dipilih'
     }
 
     if (formData.duration && isNaN(Number(formData.duration))) {
@@ -156,32 +159,72 @@ export default function AdminVideosPage() {
     return Object.keys(errors).length === 0
   }
 
+  const uploadFile = async (type: 'video' | 'thumbnail', file: File): Promise<UploadedFile> => {
+    const uploadFormData = new FormData()
+    uploadFormData.append('file', file)
+    uploadFormData.append('type', type)
+
+    const uploadResponse = await fetch('/api/admin/upload-file', {
+      method: 'POST',
+      body: uploadFormData,
+    })
+
+    const uploadResult = await uploadResponse.json()
+    if (!uploadResponse.ok) {
+      throw new Error(uploadResult?.error || `Upload ${type} gagal`)
+    }
+
+    return {
+      url: uploadResult.url,
+      fileName: uploadResult.fileName,
+      originalName: uploadResult.originalName,
+      size: uploadResult.size,
+    }
+  }
+
   // Handle submit form
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    
+
     if (!validateForm()) {
       return
     }
 
+    setSubmitting(true)
     try {
-      const url = editingVideo 
-        ? `/api/admin/videos/${editingVideo.id}`
-        : '/api/admin/videos'
-      
+      let finalVideoUrl = uploadMethod === 'link' ? formData.url.trim() : (editingVideo?.url || '')
+      let finalThumbnailUrl = formData.thumbnailUrl.trim() || null
+
+      if (selectedVideoFile) {
+        const uploadedVideo = await uploadFile('video', selectedVideoFile)
+        finalVideoUrl = uploadedVideo.url
+      }
+
+      if (uploadMethod === 'upload' && !finalVideoUrl) {
+        throw new Error('File video wajib dipilih')
+      }
+
+      if (selectedThumbnailFile) {
+        const uploadedThumbnail = await uploadFile('thumbnail', selectedThumbnailFile)
+        finalThumbnailUrl = uploadedThumbnail.url
+      } else if (editingVideo) {
+        finalThumbnailUrl = finalThumbnailUrl || editingVideo.thumbnailUrl || null
+      }
+
+      const url = editingVideo ? `/api/admin/videos/${editingVideo.id}` : '/api/admin/videos'
       const method = editingVideo ? 'PUT' : 'POST'
-      
+
       const response = await fetch(url, {
         method,
-        headers: { 
+        headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
           title: formData.title.trim(),
           description: formData.description.trim() || null,
-          url: formData.url.trim(),
-          duration: formData.duration ? parseInt(formData.duration) : null,
-          thumbnailUrl: formData.thumbnailUrl.trim() || null,
+          url: finalVideoUrl,
+          duration: formData.duration ? parseInt(formData.duration, 10) : null,
+          thumbnailUrl: finalThumbnailUrl,
         }),
       })
 
@@ -191,32 +234,34 @@ export default function AdminVideosPage() {
         setDialogOpen(false)
         resetForm()
         fetchVideos()
-        
+
         Swal.fire({
           title: 'Berhasil!',
-          text: editingVideo 
-            ? 'Video telah diperbarui dengan sukses' 
+          text: editingVideo
+            ? 'Video telah diperbarui dengan sukses'
             : 'Video baru telah ditambahkan dengan sukses',
           icon: 'success',
           timer: 2000,
-          showConfirmButton: false
+          showConfirmButton: false,
         })
       } else {
         Swal.fire({
           title: 'Kesalahan!',
           text: data.error || data.details || 'Gagal menyimpan video',
           icon: 'error',
-          confirmButtonText: 'OK'
+          confirmButtonText: 'OK',
         })
       }
     } catch (error) {
       console.error('Error saving video:', error)
       Swal.fire({
         title: 'Kesalahan!',
-        text: 'Terjadi kesalahan yang tidak terduga',
+        text: error instanceof Error ? error.message : 'Terjadi kesalahan yang tidak terduga',
         icon: 'error',
-        confirmButtonText: 'OK'
+        confirmButtonText: 'OK',
       })
+    } finally {
+      setSubmitting(false)
     }
   }
 
@@ -281,10 +326,8 @@ export default function AdminVideosPage() {
     })
     setFormErrors({})
     setDialogOpen(true)
-    
-    // Reset uploaded files
-    setUploadedVideo(null)
-    setUploadedThumbnail(null)
+    setSelectedVideoFile(null)
+    setSelectedThumbnailFile(null)
   }
 
   // Reset form
@@ -298,29 +341,8 @@ export default function AdminVideosPage() {
       thumbnailUrl: '',
     })
     setFormErrors({})
-    setUploadedVideo(null)
-    setUploadedThumbnail(null)
-  }
-
-  // Handle upload success untuk video
-  const handleVideoUploadSuccess = (fileData: UploadedFile) => {
-    setUploadedVideo(fileData)
-    setFormData(prev => ({ ...prev, url: fileData.url }))
-    
-    console.log('Video uploaded:', fileData)
-  }
-
-  // Handle upload success untuk thumbnail
-  const handleThumbnailUploadSuccess = (fileData: UploadedFile) => {
-    setUploadedThumbnail(fileData)
-    setFormData(prev => ({ ...prev, thumbnailUrl: fileData.url }))
-    
-    console.log('Thumbnail uploaded:', fileData)
-  }
-
-  // Handle upload error
-  const handleUploadError = (error: string) => {
-    console.error('Upload error:', error)
+    setSelectedVideoFile(null)
+    setSelectedThumbnailFile(null)
   }
 
   // Format durasi
@@ -695,21 +717,10 @@ export default function AdminVideosPage() {
                   <TabsContent value="upload" className="mt-4">
                     <FileUploader
                       type="video"
-                      onUploadSuccess={handleVideoUploadSuccess}
-                      onUploadError={handleUploadError}
+                      onFileChange={setSelectedVideoFile}
                       maxSize={100}
                     />
-                    
-                    {/* Tampilkan info file yang diupload */}
-                    {uploadedVideo && (
-                      <div className="mt-2 p-2 bg-green-50 border border-green-200 rounded text-sm">
-                        <p className="font-medium text-green-700">✓ Video tersimpan:</p>
-                        <p className="text-xs text-green-600 break-all mt-1">
-                          {uploadedVideo.url}
-                        </p>
-                      </div>
-                    )}
-                  </TabsContent>
+</TabsContent>
                   <TabsContent value="link" className="mt-4">
                     <div className="grid gap-2">
                       <Label htmlFor="url">
@@ -737,18 +748,10 @@ export default function AdminVideosPage() {
               <div className="grid gap-2">
                 <FileUploader
                   type="thumbnail"
-                  onUploadSuccess={handleThumbnailUploadSuccess}
-                  onUploadError={handleUploadError}
+                  onFileChange={setSelectedThumbnailFile}
                   maxSize={5}
                 />
-                
-                {/* Tampilkan info thumbnail yang diupload */}
-                {uploadedThumbnail && (
-                  <div className="mt-1 p-2 bg-green-50 border border-green-200 rounded text-sm">
-                    <p className="font-medium text-green-700">✓ Thumbnail tersimpan</p>
-                  </div>
-                )}
-              </div>
+</div>
 
               {/* Durasi */}
               <div className="grid gap-2">
@@ -788,9 +791,9 @@ export default function AdminVideosPage() {
               </Button>
               <Button 
                 type="submit"
-                disabled={uploadMethod === 'upload' && !uploadedVideo && !editingVideo}
+                disabled={submitting || (uploadMethod === 'upload' && !selectedVideoFile && !editingVideo)}
               >
-                {editingVideo ? 'Perbarui' : 'Simpan'}
+                {submitting ? 'Menyimpan...' : editingVideo ? 'Perbarui' : 'Simpan'}
               </Button>
             </DialogFooter>
           </form>
@@ -799,3 +802,4 @@ export default function AdminVideosPage() {
     </div>
   )
 }
+

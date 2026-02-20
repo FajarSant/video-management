@@ -1,15 +1,26 @@
-// app/api/customer/requests/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { prisma } from '@/lib/prisma'
+import { authOptions } from '@/app/api/auth/[...nextauth]/route'
 
 export async function GET() {
-  const session = await getServerSession()
+  const session = await getServerSession(authOptions)
   if (!session || session.user?.role !== 'CUSTOMER') {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
   try {
+    const now = new Date()
+
+    await prisma.accessRequest.updateMany({
+      where: {
+        userId: session.user.id,
+        status: 'APPROVED',
+        expiresAt: { lte: now },
+      },
+      data: { status: 'EXPIRED' },
+    })
+
     const requests = await prisma.accessRequest.findMany({
       where: { userId: session.user.id },
       include: {
@@ -17,6 +28,7 @@ export async function GET() {
           select: {
             id: true,
             title: true,
+            thumbnailUrl: true,
           },
         },
       },
@@ -30,15 +42,25 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
-  const session = await getServerSession()
+  const session = await getServerSession(authOptions)
   if (!session || session.user?.role !== 'CUSTOMER') {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
   try {
     const { videoId } = await request.json()
+    if (!videoId || typeof videoId !== 'string') {
+      return NextResponse.json({ error: 'videoId is required' }, { status: 400 })
+    }
 
-    // Check if request already exists
+    const video = await prisma.video.findUnique({
+      where: { id: videoId },
+      select: { id: true },
+    })
+    if (!video) {
+      return NextResponse.json({ error: 'Video not found' }, { status: 404 })
+    }
+
     const existingRequest = await prisma.accessRequest.findUnique({
       where: {
         userId_videoId_status: {
@@ -52,6 +74,24 @@ export async function POST(request: NextRequest) {
     if (existingRequest) {
       return NextResponse.json(
         { error: 'Request already exists' },
+        { status: 400 }
+      )
+    }
+
+    const now = new Date()
+    const activeAccess = await prisma.videoAccess.findFirst({
+      where: {
+        userId: session.user.id,
+        videoId,
+        isActive: true,
+        expiresAt: { gt: now },
+      },
+      select: { id: true },
+    })
+
+    if (activeAccess) {
+      return NextResponse.json(
+        { error: 'You already have active access for this video' },
         { status: 400 }
       )
     }

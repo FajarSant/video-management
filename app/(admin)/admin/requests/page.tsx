@@ -23,10 +23,10 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
-import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
 import { Check, X, Clock } from 'lucide-react'
+import Swal from 'sweetalert2'
 
 interface AccessRequest {
   id: string
@@ -53,24 +53,39 @@ export default function AdminRequests() {
   const [approveDialog, setApproveDialog] = useState(false)
   const [selectedRequest, setSelectedRequest] = useState<AccessRequest | null>(null)
   const [duration, setDuration] = useState('2') // default 2 hours
+  const [error, setError] = useState<string | null>(null)
+  const [actionLoadingId, setActionLoadingId] = useState<string | null>(null)
+  const [submittingApprove, setSubmittingApprove] = useState(false)
 
   useEffect(() => {
     if (status === 'unauthenticated') {
       router.push('/login')
     }
     if (session?.user?.role !== 'ADMIN') {
-      router.push('/')
+      router.push('/unauthorized')
     }
     fetchRequests()
   }, [session, status, router])
 
   const fetchRequests = async () => {
+    setError(null)
     try {
       const response = await fetch('/api/admin/requests')
+      if (!response.ok) {
+        if (response.status === 401) {
+          router.push('/login')
+          return
+        }
+        throw new Error('Gagal memuat data request')
+      }
       const data = await response.json()
-      setRequests(data)
+      if (!Array.isArray(data)) {
+        throw new Error('Format response tidak valid')
+      }
+      setRequests(data as AccessRequest[])
     } catch (error) {
       console.error('Error fetching requests:', error)
+      setError(error instanceof Error ? error.message : 'Terjadi kesalahan')
     } finally {
       setLoading(false)
     }
@@ -79,35 +94,77 @@ export default function AdminRequests() {
   const handleApprove = async () => {
     if (!selectedRequest) return
 
+    const parsedDuration = parseInt(duration, 10)
+    if (!Number.isInteger(parsedDuration) || parsedDuration <= 0) {
+      Swal.fire({
+        title: 'Kesalahan!',
+        text: 'Durasi tidak valid',
+        icon: 'error',
+        confirmButtonText: 'OK',
+      })
+      return
+    }
+
+    setSubmittingApprove(true)
     try {
       const response = await fetch(`/api/admin/requests/${selectedRequest.id}/approve`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ duration: parseInt(duration) }),
+        body: JSON.stringify({ duration: parsedDuration }),
       })
 
+      const data = await response.json()
       if (response.ok) {
         setApproveDialog(false)
         setSelectedRequest(null)
         setDuration('2')
-        fetchRequests()
+        await fetchRequests()
+        Swal.fire({
+          title: 'Berhasil!',
+          text: 'Permintaan berhasil disetujui',
+          icon: 'success',
+          timer: 1800,
+          showConfirmButton: false,
+        })
+      } else {
+        throw new Error(data?.error || 'Gagal menyetujui request')
       }
     } catch (error) {
       console.error('Error approving request:', error)
+      Swal.fire({
+        title: 'Kesalahan!',
+        text: error instanceof Error ? error.message : 'Gagal menyetujui request',
+        icon: 'error',
+        confirmButtonText: 'OK',
+      })
+    } finally {
+      setSubmittingApprove(false)
     }
   }
 
   const handleReject = async (requestId: string) => {
+    setActionLoadingId(requestId)
     try {
       const response = await fetch(`/api/admin/requests/${requestId}/reject`, {
         method: 'POST',
       })
 
+      const data = await response.json()
       if (response.ok) {
-        fetchRequests()
+        await fetchRequests()
+      } else {
+        throw new Error(data?.error || 'Gagal menolak request')
       }
     } catch (error) {
       console.error('Error rejecting request:', error)
+      Swal.fire({
+        title: 'Kesalahan!',
+        text: error instanceof Error ? error.message : 'Gagal menolak request',
+        icon: 'error',
+        confirmButtonText: 'OK',
+      })
+    } finally {
+      setActionLoadingId(null)
     }
   }
 
@@ -139,6 +196,11 @@ export default function AdminRequests() {
           <CardTitle>Permintaan Akses Video</CardTitle>
         </CardHeader>
         <CardContent>
+          {error && (
+            <div className="mb-4 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              {error}
+            </div>
+          )}
           <Table>
             <TableHeader>
               <TableRow>
@@ -152,6 +214,13 @@ export default function AdminRequests() {
               </TableRow>
             </TableHeader>
             <TableBody>
+              {requests.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={7} className="text-center text-gray-500 py-8">
+                    Belum ada request akses.
+                  </TableCell>
+                </TableRow>
+              )}
               {requests.map((request) => (
                 <TableRow key={request.id}>
                   <TableCell>
@@ -181,6 +250,7 @@ export default function AdminRequests() {
                             setSelectedRequest(request)
                             setApproveDialog(true)
                           }}
+                          disabled={actionLoadingId === request.id}
                           className="mr-2 text-green-600"
                         >
                           <Check className="h-4 w-4" />
@@ -189,6 +259,7 @@ export default function AdminRequests() {
                           variant="ghost"
                           size="sm"
                           onClick={() => handleReject(request.id)}
+                          disabled={actionLoadingId === request.id}
                           className="text-red-600"
                         >
                           <X className="h-4 w-4" />
@@ -236,7 +307,9 @@ export default function AdminRequests() {
             <Button variant="outline" onClick={() => setApproveDialog(false)}>
               Batal
             </Button>
-            <Button onClick={handleApprove}>Setujui</Button>
+            <Button onClick={handleApprove} disabled={submittingApprove}>
+              {submittingApprove ? 'Menyetujui...' : 'Setujui'}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
