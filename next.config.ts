@@ -1,7 +1,32 @@
-import type { NextConfig } from "next";
+// next.config.js
+/** @type {import('next').NextConfig} */
+const nextConfig = {
+  // Nonaktifkan server actions sepenuhnya
+  experimental: {
+    serverActions: false
+  },
+  
+  // Tambahkan konfigurasi untuk API
+  async headers() {
+    return [
+      {
+        source: '/api/:path*',
+        headers: [
+          { key: 'Access-Control-Allow-Origin', value: '*' },
+          { key: 'Access-Control-Allow-Methods', value: 'GET,POST,PUT,DELETE,OPTIONS' },
+          { key: 'Access-Control-Allow-Headers', value: 'Content-Type, Authorization' },
+        ],
+      },
+    ]
+  },
 
-const nextConfig: NextConfig = {
-  /* config options here */
-};
+  // Konfigurasi untuk menangani file besar
+  api: {
+    responseLimit: '100mb',
+    bodyParser: {
+      sizeLimit: '100mb'
+    }
+  }
+}
 
-export default nextConfig;
+module.exports = nextConfig

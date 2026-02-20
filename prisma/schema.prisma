@@ -1,0 +1,87 @@
+// prisma/schema.prisma (dengan CASCADE)
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id            String         @id @default(cuid())
+  email         String         @unique
+  password      String
+  name          String
+  role          Role           @default(CUSTOMER)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  
+  accessRequests AccessRequest[]
+  videoAccesses  VideoAccess[]
+
+  @@map("users")
+}
+
+model Video {
+  id            String         @id @default(cuid())
+  title         String
+  description   String?
+  url           String
+  duration      Int?
+  thumbnailUrl  String?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  
+  accessRequests AccessRequest[]
+  videoAccesses  VideoAccess[]
+
+  @@map("videos")
+}
+
+model AccessRequest {
+  id            String         @id @default(cuid())
+  userId        String
+  videoId       String
+  status        RequestStatus  @default(PENDING)
+  requestedAt   DateTime       @default(now())
+  approvedAt    DateTime?
+  expiresAt     DateTime?
+  duration      Int?
+  
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  video         Video          @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  
+  @@unique([userId, videoId, status])
+  @@map("access_requests")
+}
+
+model VideoAccess {
+  id            String         @id @default(cuid())
+  userId        String
+  videoId       String
+  grantedAt     DateTime       @default(now())
+  expiresAt     DateTime
+  isActive      Boolean        @default(true)
+  
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  video         Video          @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  
+  @@unique([userId, videoId])
+  @@map("video_accesses")
+}
+
+enum Role {
+  ADMIN
+  CUSTOMER
+
+  @@map("roles")
+}
+
+enum RequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  EXPIRED
+
+  @@map("request_statuses")
+}
